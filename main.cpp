@@ -2,6 +2,9 @@
 #include <string>
 #include <stdexcept>
 
+// Global handle for the text area (edit control)
+HWND g_hEditControl = NULL;
+
 // This function processes messages sent to a window.
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
@@ -28,11 +31,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     HWND hwnd = CreateWindowEx(
         0,                              // Optional window styles (e.g., WS_EX_CLIENTEDGE).
         CLASS_NAME,                     
-        L"C++ Windows Desktop App",     // Window title text.
+        L"C++ Windows Desktop App with Text Area",     // Window title text.
         WS_OVERLAPPEDWINDOW,            // Window style (standard title bar, border, min/max buttons).
 
-        // Size and position. CW_USEDEFAULT lets Windows decide.
-        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+        // Position. CW_USEDEFAULT lets Windows decide.
+        CW_USEDEFAULT, CW_USEDEFAULT, 
+        600, 400,   // width, height
 
         NULL,       // Parent window handle (NULL for a top-level window).
         NULL,       // Menu handle (NULL for no menu).
@@ -42,6 +46,28 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
     if (hwnd == NULL) {
         MessageBox(NULL, L"Window Creation Failed!", L"Error", MB_OK | MB_ICONERROR);
+        return 1;
+    }
+
+    // Create the multiline text area (Edit Control).
+    // This is a child window of the main window.
+    g_hEditControl = CreateWindowEx(
+        WS_EX_CLIENTEDGE, // Extended window style: sunken border
+        L"EDIT",          // Predefined Windows class name for an edit control
+        L"Type something here...", // Initial text
+        WS_CHILD | WS_VISIBLE | WS_VSCROLL | // Basic styles: child, visible, vertical scrollbar
+        ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN, // Edit control specific styles: multiline, auto vertical scroll, process Enter key
+        10, 10,           // X, Y position relative to parent (main window)
+        560, 340,         // Width, Height (initial size, will be adjusted on WM_SIZE)
+        hwnd,             // Parent window handle
+        (HMENU)1001,      // Control ID (unique identifier for this control, useful for WM_COMMAND)
+        hInstance,        // Instance handle of the application
+        NULL              // No additional creation parameters
+    );
+
+    // Check if edit control creation was successful.
+    if (g_hEditControl == NULL) {
+        MessageBox(NULL, L"Edit Control Creation Failed!", L"Error", MB_OK | MB_ICONERROR);
         return 1;
     }
 
@@ -67,16 +93,29 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         PostQuitMessage(0);
         return 0;
 
+    case WM_SIZE: {
+        // We need to resize the edit control to fill the client area.
+        int newWidth = LOWORD(lParam);  // New width of the client area
+        int newHeight = HIWORD(lParam); // New height of the client area
+
+        // Adjust the position and size of the edit control
+        // We'll leave a small margin (e.g., 10 pixels) around the text area
+        const int margin = 10;
+        if (g_hEditControl) {
+            MoveWindow(g_hEditControl,
+                margin,                   // X position
+                margin,                   // Y position
+                newWidth - (2 * margin),  // Width
+                newHeight - (2 * margin), // Height
+                TRUE);                    // Repaint the window
+        }
+        break;
+    }
+
     case WM_PAINT: {
         // Sent when a window needs to be repainted (e.g., exposed, resized).
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hwnd, &ps); // Prepares the specified window for painting.
-
-        // Define the text to display.
-        std::wstring text = L"Hello, World! from C++";
-        // Draw text onto the window's client area.
-        // TextOut(HDC hdc, int x, int y, LPCWSTR lpString, int cchString)
-        TextOut(hdc, 10, 10, text.c_str(), static_cast<int>(text.length()));
 
         EndPaint(hwnd, &ps); // Ends window painting and releases the display device context.
         return 0; // Message handled.
@@ -89,4 +128,5 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         // This ensures default processing for messages like resizing, moving, etc.
         return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
+    return 0;
 }
