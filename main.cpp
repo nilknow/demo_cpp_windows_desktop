@@ -1,8 +1,33 @@
 #include <windows.h>
+#include <iostream>
+#include <cstdlib> 
 #include <string>
 #include <stdexcept>
+#include <fstream>
+#include <chrono>    // For std::chrono::system_clock
+#include <iomanip>   // For std::put_time
+#include <sstream>
+#include <ctime>
 
-// Global handle for the text area (edit control)
+// Logger
+const std::string LOG_FILE_NAME = "temp_cpp_desktop.log";
+std::ofstream logFile;
+
+std::string getCurrentTimestamp() {
+    auto now = std::chrono::system_clock::now();
+    std::time_t in_time_t = std::chrono::system_clock::to_time_t(now);
+
+    std::tm timeinfo; 
+    if (localtime_s(&timeinfo, &in_time_t) != 0) {
+        return "[Timestamp Error]";
+    }
+
+    std::stringstream ss;
+    ss << std::put_time(&timeinfo, "%Y-%m-%d %H:%M:%S"); 
+    return ss.str();
+}
+
+// Global handle for the qrstext area (edit control)
 HWND g_hEditControl = NULL;
 
 // Global variables for automated typing
@@ -28,6 +53,14 @@ void StartTyping(HWND hwndParent) {
 
 // Entry Point of desktop application
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
+    logFile.open(LOG_FILE_NAME, std::ios::app);
+    // Check if the log file was opened successfully
+    if (!logFile.is_open()) {
+        std::cerr << getCurrentTimestamp() << " [ERROR] Failed to open log file: " << LOG_FILE_NAME << std::endl;
+        return EXIT_FAILURE;
+    }
+    logFile << getCurrentTimestamp() << " [INFO] Application started." << std::endl;
+
     const wchar_t CLASS_NAME[] = L"CppSampleWindowClass";
 
     WNDCLASSEX wc = { 0 };
@@ -89,6 +122,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         return 1;
     }
 
+    logFile << getCurrentTimestamp() << " [INFO] Starting to typing: " << g_hEditControl << std::endl;
     StartTyping(hwnd);
 
     // Display the window.
@@ -138,14 +172,52 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             // Calculate the character to send: 'a' + (offset % 26)
             // This will cycle from 'a' to 'z' and then loop back.
             wchar_t charToSend = L'a' + (s_currentCharOffset % 26);
-            std::wstring charStr(1, charToSend); // Convert char to a wstring for EM_REPLACESEL
+            
+            // Get the virtual key code and shift state for the character
+            // VkKeyScanW returns a SHORT: low-order byte is VK code, high-order byte is shift state.
+            // Shift state bits: 0x01 (SHIFT), 0x02 (CTRL), 0x04 (ALT)
+            SHORT vkResult = VkKeyScanW(charToSend);
+            WORD vkCode = LOBYTE(vkResult);   // Virtual Key Code (e.g., VK_A for 'a' or 'A')
 
-            // Set the selection to the end of the current text
-            SendMessage(g_hEditControl, EM_SETSEL, -1, -1);
-            // Replace the (empty) selection with the new character (effectively appends)
-            SendMessage(g_hEditControl, EM_REPLACESEL, 0, (LPARAM)charStr.c_str());
-            // Scroll the caret into view (makes sure the text area scrolls)
-            SendMessage(g_hEditControl, EM_SCROLLCARET, 0, 0);
+            // Ensure the edit control has focus before sending input
+            // This is crucial for SendInput to work correctly, as it sends to the foreground window.
+            logFile << getCurrentTimestamp() << " [INFO] Attempting to set focus to HWND: " << g_hEditControl << std::endl;
+            HWND hPrevFocus = SetFocus(g_hEditControl);
+
+            if (hPrevFocus == NULL) {
+                std::cerr << "Error: SetFocus failed for g_hEditControl." << std::endl;
+
+                DWORD errorCode = GetLastError();
+                if (errorCode != 0) { // GetLastError returns 0 if no error occurred.
+                    std::cerr << "GetLastError returned: " << errorCode << std::endl;
+                    logFile << getCurrentTimestamp() << " [INFO] SetFocus: GetLastError returned: " << errorCode << std::endl;
+                }
+
+                return EXIT_FAILURE;
+            }
+            else {
+                logFile << getCurrentTimestamp() << " [INFO] SetFocus: Success" << std::endl;
+            }
+
+            // Prepare INPUT structures for SendInput
+            // We might need up to 4 inputs: Shift Down, Char Down, Char Up, Shift Up
+            INPUT inputs[4] = { 0 };
+            int inputCount = 0;
+
+            // Key Down for the actual character
+            inputs[inputCount].type = INPUT_KEYBOARD;
+            inputs[inputCount].ki.wVk = vkCode;
+            inputs[inputCount].ki.dwFlags = 0; // Key Down
+            inputCount++;
+
+            // Key Up for the actual character
+            inputs[inputCount].type = INPUT_KEYBOARD;
+            inputs[inputCount].ki.wVk = vkCode;
+            inputs[inputCount].ki.dwFlags = KEYEVENTF_KEYUP; // Key Up
+            inputCount++;
+
+            // Send the simulated input events
+            SendInput(inputCount, inputs, sizeof(INPUT));
 
             s_currentCharOffset++; // Move to the next character/offset
         }
