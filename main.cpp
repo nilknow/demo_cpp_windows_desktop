@@ -5,8 +5,26 @@
 // Global handle for the text area (edit control)
 HWND g_hEditControl = NULL;
 
+// Global variables for automated typing
+int s_currentCharOffset = 0; // Offset from 'a' (0 for 'a', 1 for 'b', ..., 25 for 'z')
+UINT_PTR s_timerId = 0;      // Timer ID for our typing simulation
+
 // This function processes messages sent to a window.
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+
+// Function to start the typing simulation
+void StartTyping(HWND hwndParent) {
+    if (g_hEditControl == NULL) {
+        return; // Edit control not created yet
+    }
+
+    s_currentCharOffset = 0; // Reset offset to 'a'
+    SetFocus(g_hEditControl); // Give focus to the edit control
+
+    // Set a timer to send a character every 1000 milliseconds (1 second)
+    // The main window (hwndParent) will receive WM_TIMER messages
+    s_timerId = SetTimer(hwndParent, 1, 1000, NULL); // Timer ID 1, 1000ms interval, no callback function
+}
 
 // Entry Point of desktop application
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
@@ -54,7 +72,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     g_hEditControl = CreateWindowEx(
         WS_EX_CLIENTEDGE, // Extended window style: sunken border
         L"EDIT",          // Predefined Windows class name for an edit control
-        L"Type something here...", // Initial text
+        L"",              // Initial text
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | // Basic styles: child, visible, vertical scrollbar
         ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN, // Edit control specific styles: multiline, auto vertical scroll, process Enter key
         10, 10,           // X, Y position relative to parent (main window)
@@ -70,6 +88,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         MessageBox(NULL, L"Edit Control Creation Failed!", L"Error", MB_OK | MB_ICONERROR);
         return 1;
     }
+
+    StartTyping(hwnd);
 
     // Display the window.
     ShowWindow(hwnd, nCmdShow);
@@ -89,9 +109,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 // This function is called by the system to process messages for the window.
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
-    case WM_DESTROY:
-        PostQuitMessage(0);
-        return 0;
+
+    case WM_CREATE:
+        break;
 
     case WM_SIZE: {
         // We need to resize the edit control to fill the client area.
@@ -111,6 +131,34 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
         break;
     }
+
+    case WM_TIMER:
+        // Check if this is our typing timer
+        if (wParam == s_timerId) {
+            // Calculate the character to send: 'a' + (offset % 26)
+            // This will cycle from 'a' to 'z' and then loop back.
+            wchar_t charToSend = L'a' + (s_currentCharOffset % 26);
+            std::wstring charStr(1, charToSend); // Convert char to a wstring for EM_REPLACESEL
+
+            // Set the selection to the end of the current text
+            SendMessage(g_hEditControl, EM_SETSEL, -1, -1);
+            // Replace the (empty) selection with the new character (effectively appends)
+            SendMessage(g_hEditControl, EM_REPLACESEL, 0, (LPARAM)charStr.c_str());
+            // Scroll the caret into view (makes sure the text area scrolls)
+            SendMessage(g_hEditControl, EM_SCROLLCARET, 0, 0);
+
+            s_currentCharOffset++; // Move to the next character/offset
+        }
+        break;
+
+
+    case WM_DESTROY:
+        if (s_timerId != 0) {
+            KillTimer(hwnd, s_timerId);
+        }
+        PostQuitMessage(0);
+        return 0;
+
 
     case WM_PAINT: {
         // Sent when a window needs to be repainted (e.g., exposed, resized).
